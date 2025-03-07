@@ -1,0 +1,43 @@
+---
+title: "data-624-project-1"
+output: html_document
+date: "2025-03-07"
+---
+
+```{r packages}
+# load libraries
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(tsibble)
+```
+
+
+```{r cars}
+# Reading in the Excel file from the repository
+temp <- read_excel("https://github.com/Yedzinovich/data-624/raw/main/Waterflow_Pipe1.xlsx", col_types = c('date', 'numeric')) %>%
+  # Converting into date format
+  mutate(`Date Time` = as_datetime(`Date Time`)) %>%
+  # Renaming column name
+  rename(DateTime = `Date Time`) %>%
+  # Separate the date and hour
+  mutate(date = as.Date(DateTime),
+         # Get the hour
+         hour = paste(format(DateTime, format = "%H"), ":00:00"))
+
+Pipe1 <- temp %>%
+  # Replace the date time with the rounded hours
+  mutate(DateTime = ymd(date) + hms(hour)) %>%
+  # Grouping
+  group_by(DateTime) %>%
+  # Taking average for each hour
+  mutate(WaterFlow = mean(WaterFlow)) %>%
+  # Deleting duplicate rows
+  distinct(DateTime, WaterFlow) %>%
+  # Converting to tsibble
+  as_tsibble(index = DateTime)
+
+# Display the first few rows of the processed data
+head(Pipe1)
+```
+
