@@ -10,34 +10,114 @@ library(readxl)
 library(dplyr)
 library(lubridate)
 library(tsibble)
+library(forecast)
+library(writexl)
 ```
 
 
-```{r cars}
-# Reading in the Excel file from the repository
-temp <- read_excel("https://github.com/Yedzinovich/data-624/raw/main/Waterflow_Pipe1.xlsx", col_types = c('date', 'numeric')) %>%
-  # Converting into date format
-  mutate(`Date Time` = as_datetime(`Date Time`)) %>%
-  # Renaming column name
-  rename(DateTime = `Date Time`) %>%
-  # Separate the date and hour
-  mutate(date = as.Date(DateTime),
-         # Get the hour
-         hour = paste(format(DateTime, format = "%H"), ":00:00"))
+```{r loading-data}
+# reading in excel file
+data1 <- read_excel("Waterflow_Pipe1.xlsx")
+head(data1)
 
-Pipe1 <- temp %>%
-  # Replace the date time with the rounded hours
+data2 <- read_excel("Waterflow_Pipe2.xlsx")
+head(data2)
+
+# combine both dataframes
+data <- bind_rows(data1, data2)
+head(data)
+
+# convert 'DateTime' column to datetime timestamp format
+data <- data %>%
+  mutate(DateTime = as_datetime(DateTime)) %>%
+  mutate(
+    date = as.Date(DateTime),
+    hour = paste(format(DateTime, format = "%H"), ":00:00")) #a process is used to round the DateTime to the nearest hour
+head(data)
+
+
+# replace the datetime datetime with date + hour 
+data <- data %>%
   mutate(DateTime = ymd(date) + hms(hour)) %>%
-  # Grouping
-  group_by(DateTime) %>%
-  # Taking average for each hour
-  mutate(WaterFlow = mean(WaterFlow)) %>%
-  # Deleting duplicate rows
-  distinct(DateTime, WaterFlow) %>%
-  # Converting to tsibble
-  as_tsibble(index = DateTime)
+  group_by(DateTime)
+head(data)
 
-# Display the first few rows of the processed data
-head(Pipe1)
+
+# average for each hour to a specific hour
+data <- data %>% 
+  summarise(WaterFlow = mean(WaterFlow, na.rm = TRUE)) %>%
+  as_tsibble(index = DateTime)
+head(data)
+
+# check if the combined data is stationary
+adf_test <- adf.test(data$WaterFlow, alternative = "stationary")
+print(adf_test)
+
+# plot ACF and PACF
+acf(data$WaterFlow)
+pacf(data$WaterFlow)
+
+# fit ARIMA(1, 0, 1) model
+arima_model <- Arima(data$WaterFlow, order = c(2, 0, 1))
+summary(arima_model)
+
+# plot residuals
+tsdisplay(residuals(arima_model), main = "Residuals of ARIMA(1, 0, 1) Model")
+
+# AIC value
+AIC(arima_model)
+
+# auto.arima to find the best model
+auto_arima_model <- auto.arima(data$WaterFlow)
+summary(auto_arima_model)
+
+# AIC value for auto.arima model
+AIC(auto_arima_model)
+
+# forecast for the next 7 days (80% and 95% confidence lvls)
+forecast_011 <- forecast(arima_model, h = 7*24, level = c(80, 95))
+print(forecast_011)
+
+# save the data frame to excel file
+forecast_df <- data.frame(
+  DateTime = seq(from = max(data$DateTime) + 1, by = "hour", length.out = 7*24),
+  Forecast = forecast_011$mean,
+  `80% Lower CI` = forecast_011$lower[, 1],
+  `80% Upper CI` = forecast_011$upper[, 1],
+  `95% Lower CI` = forecast_011$lower[, 2],
+  `95% Upper CI` = forecast_011$upper[, 2]
+)
+
+#write_xlsx(forecast_df, "ARIMA_0-1-1_forecast.xlsx") 
+
+forecast_values <- forecast_df$Forecast
+print(forecast_values)
+
+# plot the forecast
+autoplot(forecast_011) +
+  ggtitle("ARIMA(0, 1, 1) Forecast with 80% and 95% Confidence Intervals") +
+  xlab("DateTime") +
+  ylab("WaterFlow")
+
+
+```
+
+``` {r}
+# display the forecasted water flow values
+forecast_values <- forecast_df$Forecast
+print(paste("The forecasted water flow values for the next 7 days are around", round(mean(forecast_values), 2), "units."))
+
+# display the 80% confidence interval
+ci_80_lower <- min(forecast_df$`X80..Lower.CI`)
+ci_80_upper <- max(forecast_df$`X80..Upper.CI`)
+print(paste("The 80% confidence interval ranges from approximately", round(ci_80_lower, 2), "to", round(ci_80_upper, 2), "units."))
+
+# display the 95% confidence interval
+ci_95_lower <- min(forecast_df$`X95..Lower.CI`)
+ci_95_upper <- max(forecast_df$`X95..Upper.CI`)
+print(paste("The 95% confidence interval ranges from approximately", round(ci_95_lower, 2), "to", round(ci_95_upper, 2), "units."))
+
+
+
 ```
 
